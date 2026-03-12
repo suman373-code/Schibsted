@@ -1,0 +1,15 @@
+version: 2
+
+models:
+  - name: user_features
+    description: "Feature table for ML model — combines purchase behavior with user location"
+    columns:
+      - name: user_id
+        description: "Unique user identifier"
+        tests:
+          - unique
+          - not_null
+      - name: favorite_category
+        description: "The category the user bought the most items from (ML target)"
+        tests:
+          - not_null

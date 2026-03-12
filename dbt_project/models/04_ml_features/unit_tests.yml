@@ -1,0 +1,23 @@
+version: 2
+
+unit_tests:
+
+  # -----------------------------------------------
+  # Test: user_features joins purchase data with user city correctly
+  # -----------------------------------------------
+  - name: test_user_features_join
+    description: "user_features should combine purchase summary metrics with the user's city"
+    model: user_features
+    given:
+      - input: ref('user_purchase_summary')
+        rows:
+          - { user_id: 1, total_orders: 3, total_items_purchased: 7, total_spend: 250.00, avg_item_spend: 35.71, avg_order_value: 83.33, unique_categories_bought: 2, favorite_category: "electronics", first_order_date: "2024-01-01", last_order_date: "2024-03-15" }
+          - { user_id: 2, total_orders: 1, total_items_purchased: 2, total_spend: 60.00, avg_item_spend: 30.00, avg_order_value: 60.00, unique_categories_bought: 1, favorite_category: "clothing", first_order_date: "2024-02-10", last_order_date: "2024-02-10" }
+      - input: ref('stg_users')
+        rows:
+          - { user_id: 1, first_name: "John", last_name: "Doe", email: "john@test.com", phone: "123", username: "johnd", city: "Oslo", street: "Main St", street_number: "1", zipcode: "0010", geo_lat: "59.9", geo_long: "10.7" }
+          - { user_id: 2, first_name: "Jane", last_name: "Smith", email: "jane@test.com", phone: "456", username: "janes", city: "Stockholm", street: "King St", street_number: "5", zipcode: "111", geo_lat: "59.3", geo_long: "18.0" }
+    expect:
+      rows:
+        - { user_id: 1, total_orders: 3, total_items_purchased: 7, total_spend: 250.00, avg_item_spend: 35.71, avg_order_value: 83.33, favorite_category: "electronics", unique_categories_bought: 2, city: "Oslo" }
+        - { user_id: 2, total_orders: 1, total_items_purchased: 2, total_spend: 60.00, avg_item_spend: 30.00, avg_order_value: 60.00, favorite_category: "clothing", unique_categories_bought: 1, city: "Stockholm" }

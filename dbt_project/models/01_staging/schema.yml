@@ -1,0 +1,24 @@
+version: 2
+
+models:
+  - name: stg_products
+    description: "Products with typed columns from raw JSON"
+    columns:
+      - name: product_id
+        tests: [unique, not_null]
+
+  - name: stg_users
+    description: "Users with typed columns from raw JSON"
+    columns:
+      - name: user_id
+        tests: [unique, not_null]
+
+  - name: stg_carts
+    description: "Flattened cart items: one row per (cart_id, product_id)"
+    columns:
+      - name: cart_id
+        tests: [not_null]
+      - name: product_id
+        tests: [not_null]
+      - name: user_id
+        tests: [not_null]

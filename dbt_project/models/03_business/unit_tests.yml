@@ -1,0 +1,40 @@
+version: 2
+
+unit_tests:
+
+  # -----------------------------------------------
+  # Test 1: order_items calculates revenue correctly
+  # -----------------------------------------------
+  - name: test_order_items_revenue_calculation
+    description: "Revenue should be quantity * price"
+    model: order_items
+    given:
+      - input: ref('stg_carts')
+        rows:
+          - { cart_id: 1, user_id: 1, cart_date: "2024-01-01", product_id: 10, quantity: 3 }
+          - { cart_id: 1, user_id: 1, cart_date: "2024-01-01", product_id: 20, quantity: 1 }
+      - input: ref('stg_products')
+        rows:
+          - { product_id: 10, title: "T-shirt", price: 25.00, category: "clothing", description: "", image_url: "", rating: 4.5, rating_count: 100 }
+          - { product_id: 20, title: "Ring", price: 100.00, category: "jewelery", description: "", image_url: "", rating: 3.0, rating_count: 50 }
+    expect:
+      rows:
+        - { cart_id: 1, user_id: 1, cart_date: "2024-01-01", product_id: 10, product_name: "T-shirt", category: "clothing", unit_price: 25.00, quantity: 3, revenue: 75.00 }
+        - { cart_id: 1, user_id: 1, cart_date: "2024-01-01", product_id: 20, product_name: "Ring", category: "jewelery", unit_price: 100.00, quantity: 1, revenue: 100.00 }
+
+
+  # Test 2: revenue_by_category aggregates correctly
+  
+  - name: test_revenue_by_category_aggregation
+    description: "Revenue should be summed per category"
+    model: revenue_by_category
+    given:
+      - input: ref('order_items')
+        rows:
+          - { cart_id: 1, user_id: 1, cart_date: "2024-01-01", product_id: 10, product_name: "T-shirt", category: "clothing", unit_price: 25.00, quantity: 3, revenue: 75.00 }
+          - { cart_id: 2, user_id: 2, cart_date: "2024-01-02", product_id: 11, product_name: "Jacket", category: "clothing", unit_price: 50.00, quantity: 1, revenue: 50.00 }
+          - { cart_id: 1, user_id: 1, cart_date: "2024-01-01", product_id: 20, product_name: "Ring", category: "jewelery", unit_price: 100.00, quantity: 1, revenue: 100.00 }
+    expect:
+      rows:
+        - { category: "clothing", total_orders: 2, unique_customers: 2, total_items_sold: 4, total_revenue: 125.00, avg_product_price: 37.50, revenue_per_customer: 62.50, unique_products_sold: 2 }
+        - { category: "jewelery", total_orders: 1, unique_customers: 1, total_items_sold: 1, total_revenue: 100.00, avg_product_price: 100.00, revenue_per_customer: 100.00, unique_products_sold: 1 }

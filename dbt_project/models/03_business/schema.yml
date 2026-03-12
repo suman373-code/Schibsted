@@ -1,0 +1,36 @@
+version: 2
+
+models:
+  - name: order_items
+    description: >
+      Every item from every cart, joined with product details.
+      This is our fact table — the foundation for all business metrics.
+    columns:
+      - name: cart_id
+        tests: [not_null]
+      - name: product_id
+        tests: [not_null]
+      - name: revenue
+        tests: [not_null]
+
+  - name: user_purchase_summary
+    description: >
+      One row per user with all their buying behavior:
+      how much they spend, what they like, how often they buy.
+    columns:
+      - name: user_id
+        tests: [unique, not_null]
+      - name: total_spend
+        tests: [not_null]
+      - name: favorite_category
+        description: The category where the user bought the most items.
+
+  - name: revenue_by_category
+    description: >
+      Revenue and customer metrics per product category.
+      Perfect for dashboards and category performance reports.
+    columns:
+      - name: category
+        tests: [unique, not_null]
+      - name: total_revenue
+        tests: [not_null]

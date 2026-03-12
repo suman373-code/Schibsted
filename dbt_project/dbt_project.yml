@@ -1,0 +1,31 @@
+name: 'fakestore'
+version: '1.0.0'
+config-version: 2
+
+profile: 'fakestore'
+
+model-paths: ["models"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+vars:
+  s3_stage: "@FAKESTORE_DB.RAW.S3_RAW_STAGE"
+
+models:
+  fakestore:
+    01_staging:
+      +schema: STAGING
+      +materialized: table
+    02_standardization:
+      +schema: STANDARDIZATION
+      +materialized: table
+    03_business:
+      +schema: BUSINESS
+      +materialized: table
+    04_ml_features:
+      +schema: ML
+      +materialized: table

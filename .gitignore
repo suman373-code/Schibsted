@@ -1,0 +1,24 @@
+# Environment
+.env
+*.pyc
+__pycache__/
+.venv/
+
+# Data files (don't commit raw API data)
+data/
+
+# dbt
+dbt_project/target/
+dbt_project/dbt_packages/
+dbt_project/logs/
+
+# Airflow
+airflow/logs/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

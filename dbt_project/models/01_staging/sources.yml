@@ -1,0 +1,4 @@
+version: 2
+
+# Staging models read directly from the S3 external stage (@FAKESTORE_DB.RAW.S3_RAW_STAGE)
+# No raw table sources needed — dbt queries the stage and creates staging tables.
