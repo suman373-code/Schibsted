@@ -1,6 +1,6 @@
 # Runbook — Fake Store Data Pipeline
 
-This covers how to run the pipeline both ways: manually from your terminal, or automated through Airflow. Pick whichever fits your situation — manual is great for debugging, Airflow is what you'd use day-to-day.
+This covers how to run the pipeline both ways: manually from your terminal, or automated through Airflow. Pick whichever fits your situation — manual is great for debugging, Airflow is for scheduling.
 
 ---
 
@@ -22,11 +22,10 @@ This is useful when you're developing, debugging, or just want to run one step a
 ### 1. Activate the virtual environment
 
 ```bash
-cd C:\personal\Schibsted\fakestoreapi-pipeline
+cd /c/personal/Schibsted/fakestoreapi-pipeline 
 
 python -m venv .venv            # only the first time
-source .venv/Scripts/activate   # Windows (Git Bash)
-# or: .venv\Scripts\activate    # Windows (CMD / PowerShell)
+source .venv/Scripts/activate   
 
 pip install -r requirements.txt # only the first time
 ```
@@ -53,20 +52,15 @@ python scripts/upload_to_s3.py
 
 Pushes the local JSON files to your S3 bucket, organized by endpoint (`products/`, `users/`, `carts/`). Make sure your AWS credentials in `.env` are correct.
 
-### 4. Load into Snowflake
 
-```bash
-python scripts/load_to_snowflake.py
-```
-
-Runs `COPY INTO` from the S3 external stage into the raw VARIANT tables in Snowflake. This does a full refresh (truncate + load).
-
-### 5. Run dbt models
+### 4. Run dbt models
 
 ```bash
 cd dbt_project
+set -a && source ../.env && set +a   # load Snowflake credentials into env
 dbt run --profiles-dir .
 ```
+> **Common error:** If you see `Env var required but not provided: 'SNOWFLAKE_ACCOUNT'`, it means the env vars aren't loaded. Run the `set -a && source ../.env && set +a` line first.
 
 Builds all 7 models in order:
 - **01_staging**: `stg_products`, `stg_users`, `stg_carts` (views that parse raw JSON)
@@ -74,7 +68,7 @@ Builds all 7 models in order:
 - **03_business**: `order_items`, `user_purchase_summary`, `revenue_by_category` (tables)
 - **04_ml_features**: `user_features` (input table for ML model)
 
-### 6. Run dbt tests
+### 5. Run dbt tests
 
 ```bash
 dbt test --profiles-dir .
@@ -93,7 +87,23 @@ Opens at http://localhost:8501. Shows revenue by category, top customers, and ML
 
 ### 8. (Optional) ML model
 
-After dbt finishes, the `ML.USER_FEATURES` table is ready. Create the classification model through Snowflake UI (AI & ML → Studio → Classification), then run the prediction queries from `snowflake/03_ml_model.sql`.
+After dbt finishes, the `ML.USER_FEATURES` table is ready. Open a Snowflake worksheet and run:
+
+```sql
+USE ROLE ACCOUNTADMIN;
+USE WAREHOUSE FAKESTORE_WH;
+USE DATABASE FAKESTORE_DB;
+USE SCHEMA ML;
+
+CREATE OR REPLACE SNOWFLAKE.ML.CLASSIFICATION user_interest_model(
+    INPUT_DATA => SYSTEM$REFERENCE('TABLE', 'USER_FEATURES'),
+    TARGET_COLNAME => 'FAVORITE_CATEGORY'
+);
+```
+
+Once the model is created, run the prediction and inspection queries from `snowflake/03_ml_model.sql`.
+
+> **Note:** This requires a Snowflake account with Cortex ML enabled. Trial accounts may return an "Insufficient privileges" error.
 
 ---
 
@@ -114,7 +124,7 @@ If you get an error, open Docker Desktop and wait for it to start.
 ### 2. Start the Airflow stack
 
 ```bash
-cd C:\personal\Schibsted\fakestoreapi-pipeline
+cd /c/personal/Schibsted/fakestoreapi-pipeline 
 docker compose up -d --build
 ```
 
