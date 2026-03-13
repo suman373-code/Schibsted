@@ -188,9 +188,9 @@ fakestoreapi-pipeline/
                     ┌───────────────────────────────────┐
                     │   Airflow (Docker Compose)        │
                     │   scheduled daily, 4 tasks        │
-                    └──────┬──────────┬─────────────────┘
-                           │          │
-                           ▼          ▼
+                    └──────┬──────────┬────────────|────┘
+                           │          │            |
+                           ▼          ▼            ▼
                     ┌──────────┐  ┌───────┐    ┌───────────────┐
                     │  Python  │  │  S3   │    │  Snowflake    │
                     │  scripts │─►│ (raw) │    │  (ext. stage) │
