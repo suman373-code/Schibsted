@@ -182,16 +182,12 @@ fakestoreapi-pipeline/
 
 ---
 
-## Part 2 — Running this in production
-
-A more detailed write-up is in `infra/architecture.md`, but here's the summary.
-
-### Architecture
+## Current Architecture
 
 ```
                     ┌───────────────────────────────────┐
-                    │       Airflow (orchestration)      │
-                    │   scheduled daily, retries on fail │
+                    │   Airflow (Docker Compose)        │
+                    │   scheduled daily, 4 tasks        │
                     └──────┬──────────┬─────────────────┘
                            │          │
                            ▼          ▼
@@ -203,9 +199,44 @@ A more detailed write-up is in `infra/architecture.md`, but here's the summary.
                                                        │
                                                        ▼
                                                 ┌─────────────┐
-                                                │  Streamlit   │
-                                                │  (dashboard) │
+                                                │  Streamlit  │
+                                                │  (dashboard)│
                                                 └─────────────┘
+```
+
+- **Orchestration**: Airflow running locally via Docker Compose (LocalExecutor)
+- **Extract**: Python scripts fetch JSON from Fake Store API
+- **Store**: Raw JSON lands in S3, Snowflake reads via external stage
+- **Transform**: dbt runs 7 models across staging → business layers
+- **Serve**: Streamlit dashboard reads from Snowflake BIZ schema
+
+---
+
+## Part 2 — Running this in production
+
+A more detailed write-up is in `infra/architecture.md`, but here's the summary.
+
+### Production Architecture
+
+```
+                    ┌───────────────────────────────────┐
+                    │    AWS MWAA (Managed Airflow)     │
+                    │   scheduled daily, retries on fail│
+                    └──────┬──────────┬─────────────────┘
+                           │          │
+                           ▼          ▼
+                    ┌──────────┐  ┌───────┐    ┌───────────────┐
+                    │  Python  │  │  S3   │◄───│  Snowflake    │
+                    │  scripts │─►│ (raw) │    │incrementalruns│
+                    │  (fetch) │  │       │───►│  STG → BIZ→ML │
+                    └──────────┘  └───────┘    └───────┬───────┘
+                                                       │
+                                        ┌──────────────┼──────────────┐
+                                        ▼              ▼              ▼
+                                 ┌─────────────┐ ┌───────────┐ ┌───────────┐
+                                 │  Streamlit  │ │ Elementary│ │   Slack   │
+                                 │  (dashboard)│ │ (monitor) │ │  (alerts) │
+                                 └─────────────┘ └───────────┘ └───────────┘
 ```
 
 ### How to run daily
