@@ -256,6 +256,13 @@ For a more lightweight option, WE could skip Airflow entirely and run the pipeli
 ### Code quality with SQLFluff
 
 I'd add [SQLFluff](https://sqlfluff.com/) as a SQL linter and formatter to enforce consistent style across all dbt models. In a CI/CD pipeline, `sqlfluff lint` runs on every PR to catch formatting issues and anti-patterns before they reach production. Combined with `sqlfluff fix`, it auto-formats SQL to follow team conventions (indentation, keyword casing, trailing commas, etc.). This keeps the dbt codebase clean and readable as more contributors join.
+x
+### Infrastructure as Code with Terraform
+
+Right now the Snowflake objects (warehouse, database, schemas, tables, stages) are created by running SQL scripts manually. In production, I'd manage all of this through [Terraform](https://registry.terraform.io/providers/Snowflake-Labs/snowflake/latest/docs) using the official Snowflake provider. Each resource — warehouse, database, schema, table, external stage — becomes a declarative `.tf` file. That gives us:
+
+- **PR-based infra changes** — `terraform plan` in CI shows exactly what will change before anyone approves
+This also extends to the S3 bucket and IAM policies (via the AWS provider), so the entire infrastructure — both cloud and warehouse — is versioned and reproducible.
 
 ### Adapting the pipeline for ML
 

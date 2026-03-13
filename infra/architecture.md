@@ -81,6 +81,7 @@
 | **Monitoring** | None | dbt Elementary (volume/freshness anomalies) + Airflow alerts → Slack |
 | **Dashboard** | Streamlit (local) | Streamlit Cloud or Tableau for executive-level reporting |
 | **Testing** | dbt tests only | + Python unit tests, integration tests, data quality checks (Great Expectations) |
+| **Infrastructure** | Manual SQL scripts | Terraform (Snowflake + AWS providers), PR-based infra changes |
 | **CI/CD** | Manual | GitHub Actions: lint → test → deploy dbt → trigger Airflow |
 
 ### Scaling considerations
@@ -96,6 +97,17 @@
 - **dbt Elementary** adds observability on top of dbt tests. `volume_anomalies` tracks row counts over time and flags when a table suddenly has 0 rows or 10x more than usual. 
 - **Snowflake query history** provides cost tracking and slow-query detection.
 - **Lineage** is visible through dbt docs (`dbt docs generate && dbt docs serve`).
+
+### Infrastructure as Code (Terraform)
+
+The Snowflake setup scripts (`01_setup.sql`, `02_raw_tables_and_stage.sql`) work for a demo, but in production I'd manage all Snowflake infrastructure through [Terraform](https://registry.terraform.io/providers/Snowflake-Labs/snowflake/latest/docs) with the official Snowflake provider. Every object — warehouse, database, schemas, tables, stages, roles — becomes a declarative `.tf` file with state tracking. Benefits:
+
+- **Drift detection** — `terraform plan` shows if someone changed something manually
+- **Reproducible environments** — spin up an identical dev/staging Snowflake setup in minutes
+- **PR-based changes** — infra changes go through code review, just like dbt models
+- **Clean teardown** — `terraform destroy` removes everything without leftover objects
+
+This extends to the AWS side too (S3 bucket, IAM roles, MWAA environment), so the full infrastructure stack is version-controlled and reproducible from a single `terraform apply`.
 
 ### ML integration (Snowflake Cortex)
 
