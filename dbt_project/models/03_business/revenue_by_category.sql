@@ -1,5 +1,5 @@
 -- revenue_by_category.sql
--- Simple but powerful: how does each product category perform?
+--how does each product category perform?
 -- Great for dashboards and trend analysis.
 
 with orders as (

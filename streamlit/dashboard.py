@@ -1,10 +1,8 @@
 """
 Streamlit Dashboard — Fake Store Analytics
 -------------------------------------------
-A simple report showing what's happening in our fake store.
-Connect this to the Snowflake BUSINESS schema to see live data.
-
-Run with:  streamlit run streamlit/dashboard.py
+A simple report showing key metrics and insights from our Snowflake data pipeline.
+Command :  streamlit run streamlit/dashboard.py
 """
 
 import streamlit as st
@@ -100,6 +98,7 @@ st.header("Top Customers by Spend")
 top_customers = run_query("""
     select
         user_id,
+        full_name,
         total_orders,
         total_items_purchased,
         total_spend,
@@ -112,7 +111,8 @@ top_customers = run_query("""
 
 st.dataframe(
     top_customers.rename(columns={
-        "USER_ID": "User",
+        "USER_ID": "User ID",
+        "FULL_NAME": "Name",
         "TOTAL_ORDERS": "Orders",
         "TOTAL_ITEMS_PURCHASED": "Items",
         "TOTAL_SPEND": "Total Spend ($)",
@@ -126,7 +126,6 @@ st.dataframe(
 
 # --- Section 4: ML Predictions (if available) ---
 st.header("ML: Predicted User Interests")
-st.markdown("*Powered by Snowflake Cortex ML Classification*")
 
 try:
     predictions = run_query("""
@@ -156,7 +155,6 @@ try:
 except Exception:
     st.info(
         "ML predictions not available yet. "
-        "Run snowflake/03_ml_model.sql to train the model first."
     )
 
 

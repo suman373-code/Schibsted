@@ -1,9 +1,14 @@
 -- user_purchase_summary.sql
 -- THE key metric table: everything about each user's buying behavior.
--- This is what a business analyst or ML model would look at.
+-- can be used for analysis or ml models 
 
 with orders as (
     select * from {{ ref('order_items') }}
+),
+
+users as (
+    select user_id, first_name, last_name
+    from {{ ref('stg_users') }}
 ),
 
 -- Per-user totals
@@ -41,9 +46,10 @@ favorite as (
     where rank = 1
 )
 
--- Put it all together
+-- final summary
 select
     t.user_id,
+    u.first_name || ' ' || u.last_name as full_name,
     t.total_orders,
     t.total_items_purchased,
     t.total_spend,
@@ -55,3 +61,4 @@ select
     t.last_order_date
 from user_totals t
 left join favorite f on t.user_id = f.user_id
+left join users u on t.user_id = u.user_id

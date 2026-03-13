@@ -1,6 +1,6 @@
 -- order_items.sql
--- The backbone table: one row per item purchased, with price and revenue.
--- Joins carts with products to calculate what each item cost.
+-- one row per item purchased, with price and revenue.
+-- Join carts with products to calculate what each item cost.
 
 select
     c.cart_id,

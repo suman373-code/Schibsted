@@ -1,193 +1,283 @@
-# Fake Store API — End-to-End Data Pipeline
+# Fake Store API — Data Pipeline
 
-I built this project to demonstrate a complete data pipeline — from raw API data all the way to a live dashboard. It pulls product, user, and shopping cart data from [fakestoreapi.com](https://fakestoreapi.com), lands it in S3, loads it into Snowflake, transforms it with dbt, and visualises the results in a Streamlit dashboard. Airflow orchestrates the whole thing daily using Docker Compose.
+A data pipeline that pulls from the [Fake Store API](https://fakestoreapi.com), lands JSON in S3, transforms it in Snowflake using dbt (reading directly from S3 via external stage), and shows the results in a Streamlit dashboard. 
 
-## Pipeline overview
+The whole thing runs locally with Docker (Airflow orchestration) and connects to real AWS + Snowflake accounts.
+
+---
+
+## What it does
+
+### Fetch
+
+Three endpoints are pulled via Python `requests`:
+
+- `/products` — 20 products with prices, categories, ratings
+- `/users` — 10 users with names, addresses, geo-coordinates
+- `/carts` — 7 carts (each cart has a list of product IDs and quantities)
+
+The script (`scripts/fetch_data.py`) saves each as a timestamped JSON file under `data/raw/`. Nothing is filtered or changed at this stage — it's a raw dump.
+
+### Store
+
+`scripts/upload_to_s3.py` pushes those JSON files to an S3 bucket, organized like:
 
 ```
-FakeStoreAPI → Python → S3 → Snowflake → dbt → Streamlit
-                                              └→ Snowflake ML (Classification)
+s3://schibsted-case-raw-data/raw/products/products_20260312_120000.json
+s3://schibsted-case-raw-data/raw/users/users_20260312_120000.json
+s3://schibsted-case-raw-data/raw/carts/carts_20260312_120000.json
 ```
 
-Here's what each step does:
+S3 acts as the landing zone and source of truth for raw data. Snowflake reads from it directly through an external stage (`@S3_RAW_STAGE`), so dbt can query the JSON files without any intermediate load step.
 
-1. **Fetch** — a Python script calls the API and saves the responses as timestamped JSON files locally
-2. **Upload** — another script pushes those files to an S3 bucket, organised by endpoint (`products/`, `users/`, `carts/`)
-3. **Load** — Snowflake's `COPY INTO` reads from an external S3 stage and loads the raw JSON into VARIANT tables
-4. **Transform** — dbt builds staging views (parse JSON → typed columns), business tables (joins, aggregations), and an ML feature table
-5. **Dashboard** — Streamlit connects to the business tables and shows live metrics
-6. **ML** — Snowflake Cortex ML trains a classification model to predict which product category each user prefers
-7. **Orchestrate** — Airflow runs steps 1–4 in sequence every day at midnight UTC
+### Transform (dbt)
 
-## Project structure
+This is where the data becomes useful. dbt runs 7 models across 4 layers:
 
-```
-fakestoreapi-pipeline/
-│
-├── scripts/
-│   ├── fetch_data.py              # pulls data from the API
-│   ├── upload_to_s3.py            # pushes raw JSON to S3
-│   └── load_to_snowflake.py       # COPY INTO from S3 → Snowflake
-│
-├── snowflake/
-│   ├── 01_setup.sql               # roles, warehouse, database, schemas
-│   ├── 02_raw_tables_and_stage.sql # external stage + raw VARIANT tables
-│   └── 03_ml_model.sql            # Cortex ML classification model + predictions
-│
-├── dbt_project/
-│   ├── models/
-│   │   ├── 01_staging/            # stg_products, stg_users, stg_carts
-│   │   ├── 02_standardization/    # (reserved for future use)
-│   │   ├── 03_business/           # order_items, user_purchase_summary, revenue_by_category
-│   │   └── 04_ml_features/        # user_features (input for the ML model)
-│   ├── dbt_project.yml
-│   └── profiles.yml
-│
-├── streamlit/
-│   └── dashboard.py               # analytics dashboard (4 sections)
-│
-├── airflow/
-│   └── dags/
-│       └── fakestore_pipeline.py  # DAG with 5 tasks
-│
-├── docker/
-│   └── Dockerfile                 # Airflow image + Python dependencies
-│
-├── infra/
-│   └── architecture.md            # architecture diagram + design decisions
-│
-├── docker-compose.yml             # spins up Airflow (postgres + webserver + scheduler)
-├── requirements.txt
-├── .env.example
-└── .gitignore
-```
+**Staging** — Parse the JSON and flatten it into typed columns. One model per source entity.
+- `stg_products` — reads directly from S3 stage, extracts product fields, deduplicates by product_id
+- `stg_users` — same pattern, extracts names, address, geo coords
+- `stg_carts` — flattens the nested `products` array so each row is one (cart, product) pair
 
-## Getting started
+**Standardization** — Reserved for cleaning/normalization (currently empty, but the layer exists for when it's needed).
+
+**Business** — The  analytics layer.
+- `order_items` — joins carts with products to get one row per purchased item, with price and revenue calculated
+- `user_purchase_summary` — one row per user: total spend, order count, favorite category, first/last order date
+- `revenue_by_category` — category-level metrics: revenue, customer count, avg price, items sold
+
+**ML Features** — `user_features` combines purchase behavior with location data (city) into a feature table. This was built to feed Snowflake Cortex ML Classification, though the model couldn't be run (discussed below).
+
+### Dashboard
+
+A Streamlit app (`streamlit/dashboard.py`) that reads directly from the Snowflake `BUSINESS` schema. Four sections:
+
+1. **Overview** — headline numbers (customers, orders, revenue, items)
+2. **Revenue by Category** — bar chart + detail table
+3. **Top Customers** — who's spending the most, what do they buy
+4. **ML Predictions** — shows predicted user interests if the ML model has been created (gracefully falls back if not)
+
+### Testing
+
+23 tests total:
+- **20 data tests** — not_null, unique constraints on key columns across all models (defined in `schema.yml` files)
+- **3 unit tests** — `order_items` revenue calculation, `revenue_by_category` aggregation logic, and a custom test that checks each cart belongs to exactly one user
+- All pass. Run them with `dbt test`.
+
+---
+
+## How to run it
 
 ### Prerequisites
 
-- Python 3.11+
-- A Snowflake account (free trial works fine)
-- An AWS account with an S3 bucket
-- Docker Desktop (for Airflow)
+- Python 3.10+
+- Docker & Docker Compose
+- A Snowflake account (free trial works)
+- An AWS account with S3 access
 
-### 1. Clone and set up credentials
+### Setup
+
+1. Clone the repo and create a virtualenv:
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/suman373-code/Schibsted.git
 cd fakestoreapi-pipeline
-
 python -m venv .venv
-source .venv/Scripts/activate   # Windows
+source .venv/bin/activate   # or .venv\Scripts\activate on Windows
 pip install -r requirements.txt
+```
 
+2. Copy `.env.example` to `.env` and fill in your credentials:
+
+```bash
 cp .env.example .env
-# fill in your Snowflake and AWS credentials
 ```
 
-### 2. Set up Snowflake
+You need: `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `SNOWFLAKE_PASSWORD`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`.
 
-Open a Snowflake worksheet and run these in order:
+3. Run the Snowflake setup scripts (once, as ACCOUNTADMIN):
 
+```sql
+-- Run snowflake/01_setup.sql first (creates role, warehouse, database, schemas)
+-- Then snowflake/02_raw_tables_and_stage.sql (creates raw tables + S3 stage)
 ```
-snowflake/01_setup.sql          # creates FAKESTORE_ROLE, FAKESTORE_WH, FAKESTORE_DB
-snowflake/02_raw_tables_and_stage.sql   # creates the S3 stage and raw tables
-```
 
-### 3. Run the pipeline manually
+4. Run the pipeline manually:
 
 ```bash
 python scripts/fetch_data.py
 python scripts/upload_to_s3.py
-python scripts/load_to_snowflake.py
+```
 
+5. Run dbt:
+
+```bash
 cd dbt_project
+set -a && source ../.env && set +a    # load env vars for Snowflake
 dbt run --profiles-dir .
 dbt test --profiles-dir .
 ```
 
-### 4. Start the dashboard
+6. Start the dashboard:
 
 ```bash
 streamlit run streamlit/dashboard.py
 ```
 
-### 5. Or let Airflow handle it
+### Or just use Docker (Airflow)
 
 ```bash
-docker compose up -d
-# open http://localhost:8080
-# login: airflow / airflow
-# trigger the fakestore_pipeline DAG
+docker-compose up -d
 ```
 
-Airflow runs 5 tasks in order: `fetch_data → upload_to_s3 → load_to_snowflake → dbt_run → dbt_test`. If any step fails, the rest don't execute — existing data stays safe.
+This starts Airflow at `http://localhost:8080` with a DAG (`fakestore_pipeline`) that runs 4 steps in order: fetch → upload to S3 → dbt run → dbt test. Trigger it manually from the UI or let it run on its daily schedule.
 
-### 6. (Optional) Train the ML model
+---
 
-After dbt has built the `ML.USER_FEATURES` table, create a Snowflake Cortex ML Classification model using the Snowflake UI (AI & ML → Studio → Classification). Then run the prediction queries in `snowflake/03_ml_model.sql`.
+## Assumptions and shortcuts
 
-## Data model
+A few things I'd do differently if this were a real production system:
+
+- **Credentials live in a `.env` file.** In production, these would be in AWS Secrets Manager or Snowflake key-pair auth. 
+- **Full refresh every run.** dbt reads all files from the S3 stage each time. With 20 products and 10 users, there's no point in incremental logic. At scale, I'd switch to incremental models in dbt and use S3 date partitions.
+- **No CI/CD.** Right now you run dbt locally or through Airflow. In production, I'd have GitHub Actions running `dbt build` on every PR, with a deploy step to prod after merge.
+- **Cortex ML couldn't run on my trial account.** I built the feature engineering layer (`user_features`) and wrote the Cortex ML SQL (`snowflake/03_ml_model.sql`), but got an "Insufficient privileges to operate on class CLASSIFICATION" error. This is an account-level restriction — the code itself works, it just needs a Snowflake edition with Cortex ML enabled.
+
+---
+
+## Project structure
 
 ```
-RAW (VARIANT — raw JSON as-is)
- │
- └─► STAGING (views — parse JSON into typed columns)
-      ├── stg_products    → product_id, title, price, category, rating
-      ├── stg_users       → user_id, name, email, city, geo coordinates
-      └── stg_carts       → cart_id, user_id, product_id, quantity, date
-           │
-           └─► BUSINESS (tables — joins + aggregations)
-                ├── order_items            → one row per item per cart, with revenue
-                ├── user_purchase_summary  → one row per user, total spend, favourite category
-                └── revenue_by_category    → category-level revenue and customer metrics
-                     │
-                     └─► ML
-                          ├── user_features             → feature table for classification
-                          └── user_interest_predictions  → predicted vs actual category
+fakestoreapi-pipeline/
+├── scripts/
+│   ├── fetch_data.py           # Step 1: Pull from API
+│   └── upload_to_s3.py         # Step 2: Push to S3
+├── dbt_project/
+│   ├── models/
+│   │   ├── 01_staging/         # JSON → typed columns
+│   │   ├── 02_standardization/ # (reserved)
+│   │   ├── 03_business/        # Analytics tables
+│   │   └── 04_ml_features/     # Feature engineering
+│   ├── tests/                  # Custom data tests
+│   ├── dbt_project.yml
+│   └── profiles.yml
+├── snowflake/
+│   ├── 01_setup.sql            # Roles, warehouse, database
+│   ├── 02_raw_tables_and_stage.sql
+│   └── 03_ml_model.sql         # Cortex ML (proof of concept)
+├── airflow/
+│   └── dags/
+│       └── fakestore_pipeline.py
+├── streamlit/
+│   └── dashboard.py
+├── docker/
+│   └── Dockerfile
+├── infra/
+│   └── architecture.md         # Part 2 deep-dive
+├── docker-compose.yml
+├── requirements.txt
+├── .env.example
+└── RUNBOOK.md
 ```
 
-## Testing
+---
 
-dbt runs 22 tests total:
+## Part 2 — Running this in production
 
-- **Schema tests** — `unique` and `not_null` on key columns across all models
-- **Unit tests** — mock data tests for `order_items`, `user_purchase_summary`, and `user_features` to validate join logic
+A more detailed write-up is in `infra/architecture.md`, but here's the summary.
 
-```bash
-cd dbt_project && dbt test --profiles-dir .
+### Architecture
+
+```
+                    ┌───────────────────────────────────┐
+                    │       Airflow (orchestration)      │
+                    │   scheduled daily, retries on fail │
+                    └──────┬──────────┬─────────────────┘
+                           │          │
+                           ▼          ▼
+                    ┌──────────┐  ┌───────┐    ┌───────────────┐
+                    │  Python  │  │  S3   │◄───│  Snowflake    │
+                    │  scripts │─►│ (raw) │    │  (ext. stage) │
+                    │  (fetch) │  │       │───►│  STG → BIZ    │
+                    └──────────┘  └───────┘    └───────┬───────┘
+                                                       │
+                                                       ▼
+                                                ┌─────────────┐
+                                                │  Streamlit   │
+                                                │  (dashboard) │
+                                                └─────────────┘
 ```
 
-## Tech choices
+### How to run daily
 
-| Layer | Tool | Reasoning |
-|-------|------|-----------|
-| Extract | Python + requests | the API is simple REST — no need for a heavy framework |
-| Storage | AWS S3 | cheap, scalable, doubles as Snowflake external stage |
-| Warehouse | Snowflake | handles JSON natively with VARIANT, separates compute from storage |
-| Transform | dbt | SQL-based, testable, tracks dependencies and lineage automatically |
-| Dashboard | Streamlit | python-native, fast to build, connects directly to Snowflake |
-| ML | Snowflake Cortex | everything stays inside Snowflake — no external ML infrastructure |
-| Orchestrate | Airflow | industry standard, clear task dependencies, retry logic built in |
-| Containerize | Docker Compose | one command spins up Airflow locally with Postgres |
+The Airflow DAG is already set to `schedule_interval="@daily"`. In production, I'd swap Docker Compose for AWS MWAA (Managed Airflow) so it runs without infra setup. The DAG has 4 tasks that run in sequence: `fetch_data >> upload_to_s3 >> dbt_run >> dbt_test`. If any step fails, Airflow retries once after 5 minutes. If it still fails, the DAG stays in a failed state and waits for someone to look at it.
 
-## What I'd change for production
+For a more lightweight option, WE could skip Airflow entirely and run the pipeline from a GitHub Actions workflow on a cron schedule.
 
-| Area | Current | Production |
-|------|---------|------------|
-| Secrets | `.env` file | AWS Secrets Manager or Snowflake key-pair auth |
-| Airflow | Docker Compose, LocalExecutor | AWS MWAA or Kubernetes + CeleryExecutor |
-| Monitoring | none | Slack alerts on failure, dbt test reports, Snowflake query history |
-| CI/CD | manual | GitHub Actions — lint, test, deploy dbt, trigger DAG |
-| Environments | single database | separate dev / staging / prod with dbt targets |
-| Data quality | dbt schema tests | + Great Expectations, row count monitoring, freshness checks |
-| Loading | full load (truncate + copy) | incremental with MERGE or Snowpipe |
+### One thing to monitor
 
-## Dashboard
+**Volumetric anomalies using dbt Elementary.** If the API suddenly returns 0 products or the cart count doubles overnight, something broke upstream. I'd use [Elementary](https://www.elementary-data.com/) — a dbt-native observability package — to catch this. We add `elementary.volume_anomalies` tests in our `schema.yml`, and Elementary tracks row counts over time, flagging runs where the count deviates from the historical pattern. It also supports `freshness_anomalies` and `dimension_anomalies`, and generates an HTML report (`edr report`) with a timeline of all issues. In production, these run as part of `dbt test` in the last Airflow task, with failures can be sent to Slack.
 
-The Streamlit dashboard has 4 sections:
+### One improvement before going live
 
-1. **Overview** — total customers, orders, revenue, items sold
-2. **Revenue by Category** — bar chart + table with category breakdown
-3. **Top Customers** — ranked by total spend with favourite category
-4. **ML Predictions** — predicted user interests from the Cortex classification model (shows when available, gracefully hidden otherwise)
+**Incremental loads and date-partitioned S3.** Right now every run does a full refresh. That works for 20 products, but if we had millions of transactions, we'd blow through compute and loading time daily. The fix: partition S3 files by date (`raw/products/dt=2026-03-13/`), use Snowflake's `PATTERN` option in `COPY INTO` to only load today's files, and switch dbt models to `materialized: incremental` with a `loaded_at` timestamp. That alone would cut processing time by 90%+ for large datasets.
+
+### Adapting the pipeline for ML
+
+The plan was to use **Snowflake Cortex ML Classification** to predict which product category each user is most interested in. The pieces are all in place:
+
+- **`user_features`** (dbt model) — builds a feature table in the `ML` schema by joining `user_purchase_summary` with `stg_users`. Each row is one user with: total orders, total spend, average order value, items purchased, unique categories bought, favorite category, and city.
+- **`snowflake/03_ml_model.sql`** — the SQL to create the classification model via Snowflake's UI (AI & ML → Studio → Classification), train it on `ML.USER_FEATURES` with `FAVORITE_CATEGORY` as the target, then generate predictions using `user_interest_model!PREDICT()` and write them to `ML.USER_INTEREST_PREDICTIONS`.
+- **The dashboard** already has an ML tab that reads predictions from Snowflake and shows predicted vs. actual category with confidence scores. If the model doesn't exist, it falls back gracefully.
+
+**Why it didn't work:** My Snowflake trial account didn't have the required privileges to operate on the `SNOWFLAKE.ML.CLASSIFICATION` class — running `SHOW VERSIONS IN CLASS SNOWFLAKE.ML.CLASSIFICATION` returned an "Insufficient privileges" error. This is an account-level restriction that can't be resolved with just role grants; it depends on the Snowflake edition and feature availability. I kept the code as a proof of concept — on an account with Cortex ML enabled, the SQL in `03_ml_model.sql` would work as-is.
+
+**Integrating with the DAG:** Right now the pipeline is `fetch_data >> upload_to_s3 >> dbt_run >> dbt_test`. Since `dbt_run` already builds `ML.USER_FEATURES`, I'd add two tasks after `dbt_test` to automate the prediction step:
+
+```python
+# Step 5: Run Cortex ML predictions
+ml_predict = BashOperator(
+    task_id="ml_predict",
+    bash_command=(
+        f"cd {PROJECT_DIR} && snowsql -f snowflake/03_ml_model.sql"
+        " -o output_format=plain"
+    ),
+)
+
+# Step 6: Validate predictions table is populated
+ml_validate = BashOperator(
+    task_id="ml_validate",
+    bash_command=(
+        f'cd {PROJECT_DIR} && snowsql -q "'
+        "SELECT COUNT(*) FROM FAKESTORE_DB.ML.USER_INTEREST_PREDICTIONS"
+        " WHERE predictions:class IS NOT NULL\""
+    ),
+)
+
+fetch_data >> upload_to_s3 >> dbt_run >> dbt_test >> ml_predict >> ml_validate
+```
+
+The model itself is created once via the Snowflake UI (or a one-off `CREATE SNOWFLAKE.ML.CLASSIFICATION` call). After that, the DAG only needs to re-run the `PREDICT()` step daily so predictions stay in sync with the latest `user_features` data. If we wanted to retrain periodically, we'd add a weekly DAG (or a branch in this one) that drops and recreates the model.
+
+---
+
+## Tech stack
+
+| Layer | Tool | Why |
+|-------|------|-----|
+| Extract | Python + requests | Simple REST API, no need for Spark or anything heavy |
+| Storage | AWS S3 | Cheap, Snowflake reads from it natively, decouples extract from load |
+| Warehouse | Snowflake | Handles JSON, separates compute/storage, free trial available |
+| Transform | dbt | SQL-based, testable, version-controlled, clear lineage |
+| Orchestration | Airflow (Docker) | Industry standard, shows task dependencies, easy to extend |
+| Dashboard | Streamlit | Python-native, fast to build, connects to Snowflake directly |
+
+---
+
+## Links
+
+- **Repo**: https://github.com/suman373-code/Schibsted.git
+- **API docs**: https://fakestoreapi.com
+- **dbt docs**: Run `dbt docs generate && dbt docs serve` inside `dbt_project/`
+- **Airflow UI**: http://localhost:8080 (after `docker-compose up`)
+- **Dashboard**: http://localhost:8501 (after `streamlit run streamlit/dashboard.py`)
