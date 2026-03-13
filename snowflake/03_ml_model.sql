@@ -1,35 +1,32 @@
--- ============================================================================
+
 -- Step 3: ML Classification Model (Snowflake Cortex ML)
--- ============================================================================
 -- Predicts which product category each user is most interested in
 -- Uses dbt-created ML.USER_FEATURES as training data
---
--- NOTE: The Classification model is created via the Snowflake UI:
---   AI & ML → Studio → Classification → + Create
---   Table:  FAKESTORE_DB.ML.USER_FEATURES
---   Target: FAVORITE_CATEGORY
---   Name:   user_interest_model
--- ============================================================================
 
------------------------------------------------------------
 -- SETUP
------------------------------------------------------------
+
 USE ROLE ACCOUNTADMIN;
 USE WAREHOUSE FAKESTORE_WH;
 USE DATABASE FAKESTORE_DB;
 USE SCHEMA ML;
 
--- Inspect training data (ML.USER_FEATURES created by dbt run)
+-- Check training data (ML.USER_FEATURES created by dbt run)
 SELECT * FROM USER_FEATURES LIMIT 10;
 
------------------------------------------------------------
--- VERIFY MODEL (run after UI creation completes)
------------------------------------------------------------
+
+-- CREATE MODEL 
+CREATE OR REPLACE SNOWFLAKE.ML.CLASSIFICATION user_interest_model(
+    INPUT_DATA => SYSTEM$REFERENCE('TABLE', 'USER_FEATURES'),
+    TARGET_COLNAME => 'FAVORITE_CATEGORY'
+);
+
+
+-- VERIFY MODEL CREATION
+
 CALL user_interest_model!SHOW_TRAINING_LOGS();
 
------------------------------------------------------------
+
 -- GENERATE PREDICTIONS
------------------------------------------------------------
 
 -- Generate predictions for all users
 CREATE OR REPLACE TABLE ML.USER_INTEREST_PREDICTIONS AS
@@ -54,9 +51,9 @@ SELECT
     TOTAL_ORDERS
 FROM ML.USER_INTEREST_PREDICTIONS;
 
------------------------------------------------------------
+
 -- INSPECT RESULTS
------------------------------------------------------------
+
 
 -- Model evaluation metrics
 CALL user_interest_model!SHOW_EVALUATION_METRICS();

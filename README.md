@@ -253,6 +253,10 @@ For a more lightweight option, WE could skip Airflow entirely and run the pipeli
 
 **Incremental loads and date-partitioned S3.** Right now every run does a full refresh. That works for 20 products, but if we had millions of transactions, we'd blow through compute and loading time daily. The fix: partition S3 files by date (`raw/products/dt=2026-03-13/`), use Snowflake's `PATTERN` option in `COPY INTO` to only load today's files, and switch dbt models to `materialized: incremental` with a `loaded_at` timestamp. That alone would cut processing time by 90%+ for large datasets.
 
+### Code quality with SQLFluff
+
+I'd add [SQLFluff](https://sqlfluff.com/) as a SQL linter and formatter to enforce consistent style across all dbt models. In a CI/CD pipeline, `sqlfluff lint` runs on every PR to catch formatting issues and anti-patterns before they reach production. Combined with `sqlfluff fix`, it auto-formats SQL to follow team conventions (indentation, keyword casing, trailing commas, etc.). This keeps the dbt codebase clean and readable as more contributors join.
+
 ### Adapting the pipeline for ML
 
 The plan was to use **Snowflake Cortex ML Classification** to predict which product category each user is most interested in. The pieces are all in place:
