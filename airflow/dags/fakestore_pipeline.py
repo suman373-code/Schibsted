@@ -18,7 +18,7 @@ from airflow.operators.bash import BashOperator
 PROJECT_DIR = "/opt/airflow/project"
 
 default_args = {
-    "owner": "data-team",
+    "owner": "Saurabh Suman",
     "depends_on_past": False,
     "email_on_failure": False,
     "retries": 1,
@@ -60,5 +60,5 @@ with DAG(
         bash_command=f"cd {PROJECT_DIR}/dbt_project && dbt test --profiles-dir .",
     )
 
-    # The order matters
+    # run Sequence
     fetch_data >> upload_to_s3 >> dbt_run >> dbt_test
